@@ -2,6 +2,7 @@ discord.py
 davey
 PyNaCl
 flask
-requests
+yt-dlp
+
 
 
