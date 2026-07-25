@@ -1,5 +1,7 @@
-discord.py[voice]
-yt-dlp
-flask
+discord.py
+davey
 PyNaCl
+flask
+requests
+
 
