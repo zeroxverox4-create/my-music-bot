@@ -6,7 +6,6 @@ from flask import Flask
 import discord
 from discord.ext import commands
 import requests
-import yt_dlp
 
 # --- 🌐 Keep Alive Web Server ---
 app = Flask('')
@@ -14,7 +13,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-  return 'Bot is Alive & Working!'
+  return 'Bot is Alive & Working perfectly!'
 
 
 def run_flask():
@@ -40,58 +39,34 @@ FFMPEG_OPTIONS = {
     'options': '-vn',
 }
 
-YTDL_OPTIONS = {
-    'format': 'bestaudio/best',
-    'noplaylist': True,
-    'quiet': True,
-    'no_warnings': True,
-    'nocheckcertificate': True,
-}
 
-ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)
-
-
-def get_stream_url(search_query):
-  """Piped API से डायरेक्ट ऑडियो URL ढूँढता है (No YouTube Block Error!)"""
+def search_jiosaavn(query):
+  """JioSaavn API से direct MP3 link ढूँढता है (No YouTube, No Block Error!)"""
   try:
-    if search_query.startswith('http'):
-      data = ytdl.extract_info(search_query, download=False)
-      return data['url'], data.get('title', 'Audio Track')
+    encoded_query = urllib.parse.quote(query)
+    # Fast JioSaavn API Search
+    url = f'https://saavn.dev/api/search/songs?query={encoded_query}&limit=1'
+    res = requests.get(url, timeout=10).json()
 
-    # Search via Piped Engine
-    encoded_query = urllib.parse.quote(search_query)
-    search_res = requests.get(
-        f'https://pipedapi.kavin.rocks/search?q={encoded_query}&filter=music_songs',
-        timeout=10,
-    ).json()
+    if res.get('success') and res['data']['results']:
+      song = res['data']['results'][0]
+      title = (
+          f"{song['name']} - {song['artists']['primary'][0]['name']}"
+          if song.get('artists')
+          else song['name']
+      )
 
-    if not search_res.get('items'):
-      search_res = requests.get(
-          f'https://pipedapi.kavin.rocks/search?q={encoded_query}&filter=all',
-          timeout=10,
-      ).json()
+      # Highest Quality Audio Stream URL
+      download_urls = song.get('downloadUrl', [])
+      if download_urls:
+        audio_url = download_urls[-1][
+            'url'
+        ]  # 320kbps or highest quality available
+        return audio_url, title
 
-    if not search_res.get('items'):
-      return None, None
-
-    video_id = search_res['items'][0]['url'].split('v=')[-1]
-    title = search_res['items'][0]['title']
-
-    # Get Stream Info
-    stream_data = requests.get(
-        f'https://pipedapi.kavin.rocks/streams/{video_id}', timeout=10
-    ).json()
-
-    audio_streams = stream_data.get('audioStreams', [])
-    if not audio_streams:
-      return None, None
-
-    # Best quality audio stream
-    audio_url = audio_streams[-1]['url']
-    return audio_url, title
-
+    return None, None
   except Exception as e:
-    print(f'Search Exception: {e}')
+    print(f'JioSaavn Search Error: {e}')
     return None, None
 
 
@@ -117,18 +92,18 @@ async def play(ctx, *, search: str):
     await ctx.send(f'⚠️ **VC Connection Error:** `{e}`')
     return
 
-  msg = await ctx.send(f'🔍 **Searching Track:** `{search}`...')
+  msg = await ctx.send(f'🔍 **Searching Music:** `{search}`...')
 
   loop = asyncio.get_event_loop()
   song_url, song_title = await loop.run_in_executor(
-      None, lambda: get_stream_url(search)
+      None, lambda: search_jiosaavn(search)
   )
 
   if not song_url:
     await msg.edit(
         content=(
-            '❌ **गाने का लिंक या ऑडियो स्ट्रीम नहीं मिल पाया! थोड़ा अलग नाम'
-            ' लिखकर ट्राई करें।**'
+            '❌ **गाने का ऑडियो नहीं मिल पाया! थोड़ा स्पेलिंग चेक करके दोबारा'
+            ' कोशिश करें।**'
         )
     )
     return
@@ -155,4 +130,3 @@ async def leave(ctx):
 
 keep_alive()
 bot.run(os.environ.get('DISCORD_TOKEN'))
-
