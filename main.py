@@ -1,10 +1,11 @@
 import asyncio
 import os
 from threading import Thread
+import urllib.parse
+from flask import Flask
 import discord
 from discord.ext import commands
-from flask import Flask
-import yt_dlp
+import requests
 
 # --- 🌐 Keep Alive Web Server ---
 app = Flask('')
@@ -12,7 +13,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-  return 'Bot is Active and Working!'
+  return 'Bot is Alive & Working!'
 
 
 def run_flask():
@@ -38,19 +39,42 @@ FFMPEG_OPTIONS = {
     'options': '-vn',
 }
 
-# --- 🎵 YouTube Client Bypass Options ---
-YTDL_OPTIONS = {
-    'format': 'bestaudio/best',
-    'noplaylist': True,
-    'quiet': True,
-    'no_warnings': True,
-    'default_search': 'ytsearch',
-    'nocheckcertificate': True,
-    # 🔥 एंड्रॉइड क्लाइंट बनकर यूट्यूब को बाईपास करने की ट्रिक:
-    'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
-}
 
-ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)
+def search_audio_track(query):
+  """SoundCloud HTML / Direct Search API (No YouTube Cookies Needed!)"""
+  try:
+    encoded_query = urllib.parse.quote(query)
+
+    # SoundCloud Direct Search API
+    sc_url = f'https://api-v2.soundcloud.com/search/tracks?q={encoded_query}&client_id=iZ864q22S93f2P1H125O5s089u03s810&limit=1'
+    headers = {
+        'User-Agent': (
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        )
+    }
+
+    res = requests.get(sc_url, headers=headers, timeout=8)
+
+    if res.status_code == 200 and res.json().get('collection'):
+      track = res.json()['collection'][0]
+      title = track.get('title', 'Audio Stream')
+
+      # Check media streams
+      transcodings = track.get('media', {}).get('transcodings', [])
+      for trans in transcodings:
+        if trans.get('format', {}).get('protocol') == 'progressive':
+          stream_info = requests.get(
+              f"{trans['url']}?client_id=iZ864q22S93f2P1H125O5s089u03s810",
+              headers=headers,
+              timeout=5,
+          ).json()
+          if stream_info.get('url'):
+            return stream_info['url'], title
+
+    return None, None
+  except Exception as e:
+    print(f'Search Error: {e}')
+    return None, None
 
 
 @bot.event
@@ -75,32 +99,23 @@ async def play(ctx, *, search: str):
     await ctx.send(f'⚠️ **VC Connection Error:** `{e}`')
     return
 
-  msg = await ctx.send(f'🔍 **Searching:** `{search}`...')
+  msg = await ctx.send(f'🔍 **Searching Track:** `{search}`...')
+
+  loop = asyncio.get_event_loop()
+  song_url, song_title = await loop.run_in_executor(
+      None, lambda: search_audio_track(search)
+  )
+
+  if not song_url:
+    await msg.edit(
+        content=(
+            '❌ **ऑडियो ट्रैक नहीं मिल पाया! थोड़ा अलग नाम लिखकर ट्राई करें'
+            ' (जैसे: Arijit Singh Lofi / Kesariya)।**'
+        )
+    )
+    return
 
   try:
-    loop = asyncio.get_event_loop()
-
-    if not search.startswith('http'):
-      query = f'ytsearch1:{search}'
-    else:
-      query = search
-
-    data = await loop.run_in_executor(
-        None, lambda: ytdl.extract_info(query, download=False)
-    )
-
-    if not data:
-      await msg.edit(content='❌ **गाना नहीं मिल पाया!**')
-      return
-
-    if 'entries' in data and data['entries']:
-      song_info = data['entries'][0]
-    else:
-      song_info = data
-
-    song_url = song_info.get('url')
-    song_title = song_info.get('title', 'Audio Track')
-
     if ctx.voice_client.is_playing():
       ctx.voice_client.stop()
 
@@ -122,3 +137,4 @@ async def leave(ctx):
 
 keep_alive()
 bot.run(os.environ.get('DISCORD_TOKEN'))
+    
