@@ -33,29 +33,27 @@ FFMPEG_OPTIONS = {
     'options': '-vn',
 }
 
-def search_audio_track(query):
-    """SoundCloud Direct API Search (YouTube Complete Bypass)"""
+def search_saavn(query):
+    """JioSaavn Dev API - Direct HQ Audio (Zero YouTube Dependency)"""
     try:
         encoded_query = urllib.parse.quote(query)
-        sc_url = f"https://api-v2.soundcloud.com/search/tracks?q={encoded_query}&client_id=iZ864q22S93f2P1H125O5s089u03s810&limit=1"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        api_url = f"https://saavn.dev/api/search/songs?query={encoded_query}&limit=1"
         
-        res = requests.get(sc_url, headers=headers, timeout=8)
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        res = requests.get(api_url, headers=headers, timeout=8).json()
         
-        if res.status_code == 200 and res.json().get('collection'):
-            track = res.json()['collection'][0]
-            title = track.get('title', 'Audio Stream')
+        if res.get('success') and res.get('data', {}).get('results'):
+            song = res['data']['results'][0]
+            title = song.get('name', 'Audio Track')
             
-            transcodings = track.get('media', {}).get('transcodings', [])
-            for trans in transcodings:
-                if trans.get('format', {}).get('protocol') == 'progressive':
-                    stream_info = requests.get(f"{trans['url']}?client_id=iZ864q22S93f2P1H125O5s089u03s810", headers=headers, timeout=5).json()
-                    if stream_info.get('url'):
-                        return stream_info['url'], title
-                        
+            download_urls = song.get('downloadUrl', [])
+            if download_urls:
+                audio_url = download_urls[-1].get('url')
+                return audio_url, title
+                
         return None, None
     except Exception as e:
-        print(f"Search Error: {e}")
+        print(f"JioSaavn Search Exception: {e}")
         return None, None
 
 @bot.event
@@ -79,13 +77,13 @@ async def play(ctx, *, search: str):
         await ctx.send(f"⚠️ **VC Connection Error:** `{e}`")
         return
 
-    msg = await ctx.send(f"🔍 **Searching Track:** `{search}`...")
+    msg = await ctx.send(f"🔍 **Searching Song:** `{search}`...")
 
     loop = asyncio.get_event_loop()
-    song_url, song_title = await loop.run_in_executor(None, lambda: search_audio_track(search))
+    song_url, song_title = await loop.run_in_executor(None, lambda: search_saavn(search))
 
     if not song_url:
-        await msg.edit(content="❌ **गाना नहीं मिल पाया! थोड़ा स्पेलिंग बदलकर ट्राई करें।**")
+        await msg.edit(content="❌ **गाना नहीं मिल पाया! स्पेलिंग चेक करके दोबारा ट्राई करें।**")
         return
 
     try:
@@ -108,4 +106,5 @@ async def leave(ctx):
 
 keep_alive()
 bot.run(os.environ.get("DISCORD_TOKEN"))
+        
   
