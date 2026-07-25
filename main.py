@@ -1,10 +1,11 @@
 import asyncio
 import os
 from threading import Thread
-
+import urllib.parse
+from flask import Flask
 import discord
 from discord.ext import commands
-from flask import Flask
+import requests
 import yt_dlp
 
 # --- 🌐 Keep Alive Web Server ---
@@ -13,7 +14,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-  return 'Bot is alive and YouTube-Blocked!'
+  return 'Bot is Alive & Working!'
 
 
 def run_flask():
@@ -39,25 +40,59 @@ FFMPEG_OPTIONS = {
     'options': '-vn',
 }
 
-# --- 🎵 STRICT Non-YouTube Engine ---
 YTDL_OPTIONS = {
     'format': 'bestaudio/best',
     'noplaylist': True,
     'quiet': True,
     'no_warnings': True,
-    'default_search': 'scsearch10:',  # 🔥 Fix: 10 रिजल्ट में से बेस्ट गाने पकड़ेगा
     'nocheckcertificate': True,
-    'allowed_extractors': [
-        'soundcloud',
-        'soundcloud:search',
-        'generic',
-        'bandcamp',
-        'vimeo',
-        'twitch',
-    ],
 }
 
 ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)
+
+
+def get_stream_url(search_query):
+  """Piped API से डायरेक्ट ऑडियो URL ढूँढता है (No YouTube Block Error!)"""
+  try:
+    if search_query.startswith('http'):
+      data = ytdl.extract_info(search_query, download=False)
+      return data['url'], data.get('title', 'Audio Track')
+
+    # Search via Piped Engine
+    encoded_query = urllib.parse.quote(search_query)
+    search_res = requests.get(
+        f'https://pipedapi.kavin.rocks/search?q={encoded_query}&filter=music_songs',
+        timeout=10,
+    ).json()
+
+    if not search_res.get('items'):
+      search_res = requests.get(
+          f'https://pipedapi.kavin.rocks/search?q={encoded_query}&filter=all',
+          timeout=10,
+      ).json()
+
+    if not search_res.get('items'):
+      return None, None
+
+    video_id = search_res['items'][0]['url'].split('v=')[-1]
+    title = search_res['items'][0]['title']
+
+    # Get Stream Info
+    stream_data = requests.get(
+        f'https://pipedapi.kavin.rocks/streams/{video_id}', timeout=10
+    ).json()
+
+    audio_streams = stream_data.get('audioStreams', [])
+    if not audio_streams:
+      return None, None
+
+    # Best quality audio stream
+    audio_url = audio_streams[-1]['url']
+    return audio_url, title
+
+  except Exception as e:
+    print(f'Search Exception: {e}')
+    return None, None
 
 
 @bot.event
@@ -82,61 +117,33 @@ async def play(ctx, *, search: str):
     await ctx.send(f'⚠️ **VC Connection Error:** `{e}`')
     return
 
-  msg = await ctx.send(f'🔍 **Searching SoundCloud:** `{search}`...')
+  msg = await ctx.send(f'🔍 **Searching Track:** `{search}`...')
+
+  loop = asyncio.get_event_loop()
+  song_url, song_title = await loop.run_in_executor(
+      None, lambda: get_stream_url(search)
+  )
+
+  if not song_url:
+    await msg.edit(
+        content=(
+            '❌ **गाने का लिंक या ऑडियो स्ट्रीम नहीं मिल पाया! थोड़ा अलग नाम'
+            ' लिखकर ट्राई करें।**'
+        )
+    )
+    return
 
   try:
-    loop = asyncio.get_event_loop()
-
-    # Always force SoundCloud search with results
-    if not search.startswith('http'):
-      query = f'scsearch10:{search}'
-    else:
-      query = search
-
-    data = await loop.run_in_executor(
-        None, lambda: ytdl.extract_info(query, download=False)
-    )
-
-    if not data:
-      await msg.edit(
-          content=(
-              '❌ **SoundCloud पर यह गाना नहीं मिला। थोड़ा अलग नाम लिखकर ट्राई'
-              ' करें!**'
-          )
-      )
-      return
-
-    if 'entries' in data and data['entries']:
-      # फ़िल्टर करके पहला वैलिड गाना उठाएगा
-      song_info = None
-      for entry in data['entries']:
-        if entry:
-          song_info = entry
-          break
-
-      if not song_info:
-        await msg.edit(content='❌ **कोई सही ऑडियो ट्रैक नहीं मिला!**')
-        return
-    else:
-      song_info = data
-
-    song_url = song_info.get('url')
-    song_title = song_info.get('title', 'Audio Stream')
-
     if ctx.voice_client.is_playing():
       ctx.voice_client.stop()
 
     source = discord.FFmpegPCMAudio(song_url, **FFMPEG_OPTIONS)
     ctx.voice_client.play(source)
 
-    await msg.edit(content=f'🎶 **Now Playing (SoundCloud):** `{song_title}`')
+    await msg.edit(content=f'🎶 **Now Playing:** `{song_title}`')
 
   except Exception as e:
-    await msg.edit(
-        content=(
-            '⚠️ **Play Error:** SoundCloud पर यह गाना ढूंढने में दिक्कत आई।'
-        )
-    )
+    await msg.edit(content=f'⚠️ **Play Error:** `{e}`')
 
 
 @bot.command(name='leave')
@@ -148,4 +155,4 @@ async def leave(ctx):
 
 keep_alive()
 bot.run(os.environ.get('DISCORD_TOKEN'))
-    
+
