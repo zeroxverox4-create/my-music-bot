@@ -1,9 +1,9 @@
-
 discord.py
 davey
 PyNaCl
 flask
 requests
+
 
 
 
