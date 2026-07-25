@@ -39,35 +39,58 @@ FFMPEG_OPTIONS = {
     'options': '-vn',
 }
 
+# Reliable Invidious / Alternative Instances
+INVIDIOUS_INSTANCES = [
+    'https://invidious.nerdvpn.de',
+    'https://inv.tux.pizza',
+    'https://invidious.drgns.space',
+    'https://vid.puffyan.us',
+]
 
-def search_jiosaavn(query):
-  """JioSaavn API से direct MP3 link ढूँढता है (No YouTube, No Block Error!)"""
-  try:
-    encoded_query = urllib.parse.quote(query)
-    # Fast JioSaavn API Search
-    url = f'https://saavn.dev/api/search/songs?query={encoded_query}&limit=1'
-    res = requests.get(url, timeout=10).json()
 
-    if res.get('success') and res['data']['results']:
-      song = res['data']['results'][0]
-      title = (
-          f"{song['name']} - {song['artists']['primary'][0]['name']}"
-          if song.get('artists')
-          else song['name']
-      )
+def fetch_audio_stream(query):
+  """Multiple Invidious Mirrors से Audio Stream ढूँढता है (No Bot Block Error!)"""
+  encoded_query = urllib.parse.quote(query)
 
-      # Highest Quality Audio Stream URL
-      download_urls = song.get('downloadUrl', [])
-      if download_urls:
-        audio_url = download_urls[-1][
-            'url'
-        ]  # 320kbps or highest quality available
-        return audio_url, title
+  for instance in INVIDIOUS_INSTANCES:
+    try:
+      # Search video
+      search_url = f'{instance}/api/v1/search?q={encoded_query}&type=video'
+      res = requests.get(search_url, timeout=5)
 
-    return None, None
-  except Exception as e:
-    print(f'JioSaavn Search Error: {e}')
-    return None, None
+      if res.status_code == 200 and res.json():
+        items = res.json()
+        if not items:
+          continue
+
+        video_id = items[0]['videoId']
+        title = items[0]['title']
+
+        # Fetch video stream details
+        video_url = f'{instance}/api/v1/videos/{video_id}'
+        video_res = requests.get(video_url, timeout=5)
+
+        if video_res.status_code == 200:
+          data = video_res.json()
+          adaptive_formats = data.get('adaptiveFormats', [])
+
+          # Pick best audio stream
+          audio_streams = [
+              f
+              for f in adaptive_formats
+              if f.get('type', '').startswith('audio/')
+          ]
+          if audio_streams:
+            # Sort by highest bitrate
+            audio_streams.sort(
+                key=lambda x: int(x.get('bitrate', 0)), reverse=True
+            )
+            return audio_streams[0]['url'], title
+    except Exception as e:
+      print(f'Failed on instance {instance}: {e}')
+      continue
+
+  return None, None
 
 
 @bot.event
@@ -92,18 +115,17 @@ async def play(ctx, *, search: str):
     await ctx.send(f'⚠️ **VC Connection Error:** `{e}`')
     return
 
-  msg = await ctx.send(f'🔍 **Searching Music:** `{search}`...')
+  msg = await ctx.send(f'🔍 **Searching Track:** `{search}`...')
 
   loop = asyncio.get_event_loop()
   song_url, song_title = await loop.run_in_executor(
-      None, lambda: search_jiosaavn(search)
+      None, lambda: fetch_audio_stream(search)
   )
 
   if not song_url:
     await msg.edit(
         content=(
-            '❌ **गाने का ऑडियो नहीं मिल पाया! थोड़ा स्पेलिंग चेक करके दोबारा'
-            ' कोशिश करें।**'
+            '❌ **ऑडियो नहीं मिल पाया! थोड़ा अलग नाम लिखकर प्रयास करें।**'
         )
     )
     return
@@ -130,3 +152,4 @@ async def leave(ctx):
 
 keep_alive()
 bot.run(os.environ.get('DISCORD_TOKEN'))
+
