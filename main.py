@@ -1,100 +1,125 @@
 import asyncio
+import os
+from threading import Thread
+
 import discord
 from discord.ext import commands
-import yt_dlp
 from flask import Flask
-from threading import Thread
-import os
+import yt_dlp
 
 # --- 🌐 Flask Web Server for Render 24/7 ---
-app = Flask('')
+app = Flask("")
 
-@app.route('/')
+
+@app.route("/")
 def home():
-    return "Bot is alive!"
+  return "Bot is alive!"
+
 
 def run_flask():
-    port = int(os.environ.get('PORT', 8080))
-    app.run(host='0.0.0.0', port=port)
+  port = int(os.environ.get("PORT", 8080))
+  app.run(host="0.0.0.0", port=port)
+
 
 def keep_alive():
-    t = Thread(target=run_flask)
-    t.start()
+  t = Thread(target=run_flask)
+  t.start()
+
 
 # --- 🤖 Discord Bot Setup ---
 intents = discord.Intents.default()
 intents.message_content = True
 
-bot = commands.Bot(command_prefix='k!', intents=intents)
+bot = commands.Bot(command_prefix="k!", intents=intents)
 
 FFMPEG_OPTIONS = {
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-    'options': '-vn',
+    "before_options": (
+        "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
+    ),
+    "options": "-vn",
 }
 
+# Soundcloud / High-compatibility Audio Extraction
 YTDL_OPTIONS = {
-    'format': 'bestaudio/best',
-    'noplaylist': True,
-    'quiet': True,
-    'no_warnings': True,
-    'default_search': 'ytsearch',
+    "format": "bestaudio/best",
+    "noplaylist": True,
+    "quiet": True,
+    "no_warnings": True,
+    "default_search": "scsearch",  # SoundCloud stream (No YT Blocks)
+    "source_address": "0.0.0.0",
+    "nocheckcertificate": True,
 }
 
 ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)
 
+
 @bot.event
 async def on_ready():
-    print(f'✅ Bot Active: {bot.user.name}')
+  print(f"✅ Bot Active: {bot.user.name}")
 
-@bot.command(name='play')
+
+@bot.command(name="play")
 async def play(ctx, *, search: str):
-    if not ctx.author.voice:
-        await ctx.send("❌ **भाई, पहले किसी Voice Channel में तो जुड़ो!**")
-        return
+  if not ctx.author.voice:
+    await ctx.send("❌ **भाई, पहले किसी Voice Channel में जुड़ो!**")
+    return
 
-    channel = ctx.author.voice.channel
+  channel = ctx.author.voice.channel
 
-    try:
-        if ctx.voice_client is None:
-            await channel.connect()
-        elif ctx.voice_client.channel != channel:
-            await ctx.voice_client.move_to(channel)
-    except Exception as e:
-        await ctx.send(f"⚠️ **VC Connection Error:** `{e}`")
-        return
+  try:
+    if ctx.voice_client is None:
+      await channel.connect()
+    elif ctx.voice_client.channel != channel:
+      await ctx.voice_client.move_to(channel)
+  except Exception as e:
+    await ctx.send(f"⚠️ **VC Connection Error:** `{e}`")
+    return
 
-    msg = await ctx.send(f"🔍 **Searching YouTube for:** `{search}`...")
+  msg = await ctx.send(f"🔍 **Searching & Loading:** `{search}`...")
 
-    try:
-        loop = asyncio.get_event_loop()
-        query = f"ytsearch1:{search}" if not search.startswith('http') else search
-        
-        data = await loop.run_in_executor(None, lambda: ytdl.extract_info(query, download=False))
+  try:
+    loop = asyncio.get_event_loop()
 
-        if 'entries' in data and data['entries']:
-            song_info = data['entries'][0]
-        else:
-            song_info = data
+    # Search SoundCloud for stable streaming
+    query = (
+        f"scsearch1:{search}" if not search.startswith("http") else search
+    )
+    data = await loop.run_in_executor(
+        None, lambda: ytdl.extract_info(query, download=False)
+    )
 
-        song_url = song_info.get('url')
-        song_title = song_info.get('title', 'Audio Stream')
+    if "entries" in data and data["entries"]:
+      song_info = data["entries"][0]
+    else:
+      song_info = data
 
-        if ctx.voice_client.is_playing():
-            ctx.voice_client.stop()
+    song_url = song_info.get("url")
+    song_title = song_info.get("title", "Audio Stream")
 
-        source = discord.FFmpegPCMAudio(stream_url if 'stream_url' in locals() else song_url, **FFMPEG_OPTIONS)
-        ctx.voice_client.play(source)
+    if ctx.voice_client.is_playing():
+      ctx.voice_client.stop()
 
-        await msg.edit(content=f"🎶 **Now Playing:** `{song_title}`")
+    source = discord.FFmpegPCMAudio(song_url, **FFMPEG_OPTIONS)
+    ctx.voice_client.play(source)
 
-    except Exception as e:
-        await msg.edit(content=f"⚠️ **Play Error:** `{type(e).__name__}: {e}`")
+    await msg.edit(content=f"🎶 **Now Playing:** `{song_title}`")
 
-@bot.command(name='leave')
+  except Exception as e:
+    await msg.edit(
+        content=(
+            f"⚠️ **Error playing song:** `{e}`\nकोशिश करें: गाने और आर्टिस्ट"
+            " का नाम सही से लिखें।"
+        )
+    )
+
+
+@bot.command(name="leave")
 async def leave(ctx):
-    if ctx.voice_client:
-        await ctx.voice_client.disconnect()
-        await ctx.send("👋 **VC से बाहर आ गया!**")
+  if ctx.voice_client:
+    await ctx.voice_client.disconnect()
+    await ctx.send("👋 **VC से बाहर आ गया!**")
+
 
 keep_alive()
-bot.run(os.environ.get("DISCORD_TOKEN", "YOUR_BOT_TOKEN_HERE"))
+bot.run(os.environ.get("DISCORD_TOKEN"))
+               
