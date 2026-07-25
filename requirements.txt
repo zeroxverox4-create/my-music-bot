@@ -1,5 +1,5 @@
-discord.py
-PyNaCl
+discord.py[voice]
 yt-dlp
 flask
-gunicorn
+PyNaCl
+
